@@ -4,20 +4,27 @@ import sys
 
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
-from aiogram.types import BotCommand
+from aiogram.types import BotCommand, Message, CallbackQuery
 from aiogram.client.default import DefaultBotProperties
+from aiogram.filters import CommandStart
 
 from app.config import BOT_TOKEN
 from app.handlers import router
+from app.db import init_db, close_db, log_user
 
 # Конфигурация логирования
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
         logging.StreamHandler(stream=sys.stdout)
     ]
 )
+
+# Установка уровня логирования для специфических библиотек
+logging.getLogger('aiogram').setLevel(logging.INFO)
+logging.getLogger('asyncio').setLevel(logging.INFO)
+logging.getLogger('aiohttp').setLevel(logging.INFO)
 
 # Список команд бота
 async def set_commands(bot: Bot):
@@ -27,14 +34,69 @@ async def set_commands(bot: Bot):
     ]
     await bot.set_my_commands(commands)
 
+# Middleware для логирования пользователей из сообщений
+async def message_logging_middleware(handler, event, data):
+    # Log the user if message has from_user
+    if isinstance(event, Message) and event.from_user:
+        # Log the user
+        await log_user(
+            user_id=event.from_user.id,
+            username=event.from_user.username,
+            first_name=event.from_user.first_name,
+            last_name=event.from_user.last_name,
+            chat_id=event.chat.id
+        )
+    # Continue processing
+    return await handler(event, data)
+
+# Middleware для логирования пользователей из callback query (кнопки)
+async def callback_logging_middleware(handler, event, data):
+    # Log the user if callback has from_user
+    if isinstance(event, CallbackQuery) and event.from_user:
+        # Log the user
+        await log_user(
+            user_id=event.from_user.id,
+            username=event.from_user.username,
+            first_name=event.from_user.first_name,
+            last_name=event.from_user.last_name,
+            chat_id=event.message.chat.id
+        )
+    # Continue processing
+    return await handler(event, data)
+
+# Diagnostic middleware for messages
+async def diagnostic_message_middleware(handler, event, data):
+    if isinstance(event, Message) and event.from_user:
+        user_id = event.from_user.id
+        logging.debug(f"DIAGNOSTIC: Processing message from user_id={user_id}")
+    return await handler(event, data)
+
+# Diagnostic middleware for callback queries
+async def diagnostic_callback_middleware(handler, event, data):
+    if isinstance(event, CallbackQuery) and event.from_user:
+        user_id = event.from_user.id
+        logging.debug(f"DIAGNOSTIC: Processing callback from user_id={user_id}")
+    return await handler(event, data)
+
 # Основная функция запуска бота
 async def main():
+    # Инициализация базы данных
+    await init_db()
+    
     # Инициализация бота и диспетчера
     bot = Bot(
         token=BOT_TOKEN, 
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
     )
     dp = Dispatcher()
+    
+    # Добавляем diagnostic middleware
+    dp.message.middleware(diagnostic_message_middleware)
+    dp.callback_query.middleware(diagnostic_callback_middleware)
+    
+    # Добавляем middleware для логирования пользователей
+    dp.message.middleware(message_logging_middleware)
+    dp.callback_query.middleware(callback_logging_middleware)
     
     # Регистрация роутеров
     dp.include_router(router)
@@ -44,7 +106,11 @@ async def main():
     
     # Запуск поллинга
     logging.info("Бот AIRabbit запущен")
-    await dp.start_polling(bot, skip_updates=True)
+    try:
+        await dp.start_polling(bot, skip_updates=True)
+    finally:
+        # Закрываем соединение с базой данных при завершении
+        await close_db()
 
 if __name__ == "__main__":
     try:
