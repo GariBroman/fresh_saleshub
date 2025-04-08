@@ -38,8 +38,8 @@ async def send_delayed_follow_up(bot: Bot, chat_id: int, user_id: int):
         # Create keyboard with a button to the manager bot
         keyboard = InlineKeyboardBuilder()
         keyboard.row(InlineKeyboardButton(
-            text="💬 Написать нейро-сотруднику", 
-            url="https://t.me/airabbitsaler_bot"
+            text="📝 Оставить заявку", 
+            url="https://t.me/Tupikov_A"
         ))
         
         # Send the message
