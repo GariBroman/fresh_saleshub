@@ -29,4 +29,4 @@ CATEGORIES = {
 }
 
 # Контакт для перенаправления из переменной окружения или дефолтный
-MARKETING_CONTACT = os.getenv("MARKETING_CONTACT", "@Tupikov_A") 
+MARKETING_CONTACT = os.getenv("MARKETING_CONTACT", "@maximdeveloper") 
