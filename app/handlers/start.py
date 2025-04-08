@@ -8,7 +8,7 @@ import asyncpg
 from app.keyboards.main_kb import get_main_keyboard, get_cases_keyboard
 from app.handlers.callback import WELCOME_MESSAGE
 from app.db import log_user
-from app.db.connection import DB_URL
+from app.handlers.scheduled import schedule_follow_up_message
 
 # Маршрутизатор для команды /start
 router = Router()
@@ -29,7 +29,7 @@ CASES_MESSAGE = """Твой топовый ИИ-маркетолог!🔥
 @router.message(Command("start"))
 async def command_start(message: Message, state: FSMContext):
     # Явно логируем пользователя при старте
-    success = await log_user(
+    success, is_new_user = await log_user(
         user_id=message.from_user.id,
         username=message.from_user.username,
         first_name=message.from_user.first_name,
@@ -37,42 +37,13 @@ async def command_start(message: Message, state: FSMContext):
         chat_id=message.chat.id
     )
     
-    # Отладочное сообщение о результате логирования
-    logging.debug(f"Log user result: {success}")
-    
-    # Попытка прямого подключения к базе данных и вставки
-    try:
-        # Прямое подключение к базе
-        logging.debug(f"Attempting direct DB connection with URL: {DB_URL[:20]}[...]")
-        conn = await asyncpg.connect(DB_URL)
-        
-        # Проверка подключения
-        version = await conn.fetchval("SELECT version()")
-        logging.debug(f"Direct DB connection successful: {version}")
-        
-        # Попытка прямой вставки
-        user_id = message.from_user.id
-        username = message.from_user.username or "no_username"
-        first_name = message.from_user.first_name or "no_first_name"
-        last_name = message.from_user.last_name or "no_last_name"
-        chat_id = message.chat.id
-        
-        # Прямая попытка вставки (игнорируем уже существующих пользователей)
-        try:
-            await conn.execute('''
-                INSERT INTO users (user_id, username, first_name, last_name, chat_id, created_at)
-                VALUES ($1, $2, $3, $4, $5, NOW())
-                ON CONFLICT (user_id) DO NOTHING
-            ''', user_id, username, first_name, last_name, chat_id)
-            logging.debug(f"Direct DB insert attempted for user_id={user_id}")
-        except Exception as e:
-            logging.error(f"Direct DB insert error: {e}")
-        
-        # Закрываем соединение
-        await conn.close()
-        logging.debug("Direct DB connection closed")
-    except Exception as e:
-        logging.error(f"Direct DB connection error: {e}")
+    # Если это новый пользователь, планируем отправку сообщения через 5 минут
+    if success and is_new_user:
+        await schedule_follow_up_message(
+            bot=message.bot,
+            chat_id=message.chat.id,
+            user_id=message.from_user.id
+        )
     
     # Отправляем второе сообщение с клавиатурой для кейсов (отображается первым)
     await message.answer(
